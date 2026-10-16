@@ -288,7 +288,8 @@ std::vector<std::byte> parent_bytes(const WeightParent& parent, bool device) {
 void ggml_writer_residencies(DeviceContext& device, const std::filesystem::path& path) {
     Reader reader(path);
     const auto objects = ggml_objects(reader);
-    require(objects.size() == 12, "writer fixture lost a GGML format or layout");
+    // writer_interop.py emits nine GGML block formats and four expert-record formats.
+    require(objects.size() == 13, "writer fixture lost a GGML format or layout");
     for (const auto residency : {Residency::Pinned, Residency::Host}) {
         Binder binder(reader);
         for (const auto object : objects) {
