@@ -1327,6 +1327,8 @@ void test_remote_upload_and_second_engine() {
     TempDirectory first_directory;
     TempDirectory second_directory;
     auto remote = std::make_shared<MemoryObjectStore>();
+    ContextStore other(remote_options(second_directory.path(), remote));
+    check(drained(other), "the reader's initial empty-bucket refresh did not finish");
     const auto kv    = pseudo_random(5000, 4);
     const auto image = concat({pseudo_random(30, 1), kv});
     {
@@ -1344,7 +1346,6 @@ void test_remote_upload_and_second_engine() {
         check(remote->puts - before == 3, "a rewritten image uploaded chunks the bucket already had");
     }
     // A second engine with an empty directory sees the image and fetches it when asked.
-    ContextStore other(remote_options(second_directory.path(), remote));
     check(other.refresh_remote() == 1 && other.list().size() == 1, "the remote image was not listed");
     check(!other.list()[0].local, "an image not fetched yet reports itself local");
     check(other.stats().remote_images == 1, "the remote-only image was not counted");
@@ -1699,14 +1700,15 @@ void test_absent_chunks_are_not_reused() {
     TempDirectory first;
     TempDirectory second;
     auto remote       = std::make_shared<MemoryObjectStore>();
+    ContextStore store(remote_options(second.path(), remote));
+    check(drained(store), "the reader's initial empty-bucket refresh did not finish");
     const auto shared = pseudo_random(4096, 9);
     {
-        ContextStore store(remote_options(first.path(), remote));
-        (void)store.put(describe("0a"), concat({pseudo_random(30, 1), shared}),
+        ContextStore writer(remote_options(first.path(), remote));
+        (void)writer.put(describe("0a"), concat({pseudo_random(30, 1), shared}),
                         std::array{ContextStore::Region{30, 4096}});
-        check(drained(store), "upload a");
+        check(drained(writer), "upload a");
     }
-    ContextStore store(remote_options(second.path(), remote));
     check(store.refresh_remote() == 1 && !store.list()[0].local, "the image was not registered");
     const auto result = store.put(describe("0c"), concat({pseudo_random(30, 2), shared}),
                                   std::array{ContextStore::Region{30, 4096}});
@@ -1808,24 +1810,25 @@ void test_expired_remote_chunks_are_put_back() {
 void test_local_ttl_does_not_hide_remote_images() {
     TempDirectory first;
     TempDirectory second;
+    TempDirectory third;
     auto remote = std::make_shared<MemoryObjectStore>();
-    const auto image = concat({pseudo_random(30, 1), pseudo_random(3000, 2)});
-    {
-        ContextStore store(remote_options(first.path(), remote));
-        (void)store.put(describe("0a"), image, std::array{ContextStore::Region{30, 3000}});
-        check(drained(store), "upload");
-    }
-    remote->clock += 3 * 24 * 3600 * 1000LL;
     ContextStore::Options options = remote_options(second.path(), remote);
     options.ttl                   = std::chrono::hours(1);
     ContextStore store(options);
+    ContextStore other(remote_options(third.path(), remote));
+    check(drained(store) && drained(other), "the readers' initial empty-bucket refreshes did not finish");
+    const auto image = concat({pseudo_random(30, 1), pseudo_random(3000, 2)});
+    {
+        ContextStore writer(remote_options(first.path(), remote));
+        (void)writer.put(describe("0a"), image, std::array{ContextStore::Region{30, 3000}});
+        check(drained(writer), "upload");
+    }
+    remote->clock += 3 * 24 * 3600 * 1000LL;
     check(store.refresh_remote() == 1, "an image older than the local TTL was not registered");
     store.maintain();
     const auto loaded = store.load("0a");
     check(loaded && *loaded == image, "an image older than the local TTL could not be used");
     // The bucket drops it (lifecycle): a refresh drops it from the index too, once nothing local backs it.
-    TempDirectory third;
-    ContextStore other(remote_options(third.path(), remote));
     check(other.refresh_remote() == 1, "register");
     {
         std::scoped_lock lock(remote->mutex);
