@@ -285,7 +285,14 @@ void merge_added_tokens_decoder(const Json& root, std::string_view label,
                                 const std::unordered_set<int>& occupied_vocab_ids,
                                 const std::unordered_map<std::string, int>& occupied_vocab_tokens,
                                 std::vector<AddedToken>& tokens) {
-    const Json& decoder = require_object_field(root, "added_tokens_decoder", label);
+    if (!root.is_object()) {
+        throw std::invalid_argument(std::string(label) + " must be an object");
+    }
+    // Modern exports keep the complete definitions in tokenizer.json alone.
+    const Json empty_decoder = Json::object();
+    const Json& decoder = root.contains("added_tokens_decoder")
+                              ? require_object_field(root, "added_tokens_decoder", label)
+                              : empty_decoder;
     std::unordered_map<int, std::size_t> token_by_id;
     std::unordered_map<std::string, int> token_by_content;
     std::unordered_set<int> decoder_ids;
