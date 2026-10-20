@@ -157,6 +157,19 @@ def qwen3_6_35b_a3b(model, recipe, sources):
         _assign(recipe, name, format)
 
 
+def infinity_parser2_pro(model, recipe, sources):
+    """Parser2 Pro's 35B-A3B text profile with a mostly BF16 vision tower.
+
+    Keep the established Q4 gate/up, Q5/Q6 down and Q8 projection paths. Vision
+    retains its source precision except the final 2048-wide merger projection,
+    whose existing native route consumes Q8. No speculative companion is needed.
+    """
+    qwen3_6_35b_a3b(model, recipe, sources)
+    for name, parameter in model.parameters.items():
+        if name.startswith("vision/") and parameter.projection:
+            _assign(recipe, name, Q8 if name == "vision/merger/fc2" else "bf16")
+
+
 def qwen3_6_27b_nvfp4(model, recipe, sources):
     if "num_experts" in model.config:
         raise ValueError("this official recipe requires Qwen3.5 Dense mathematics")
@@ -255,5 +268,6 @@ RECIPES = {
     "qwen3_8_27b": qwen3_8_27b,
     "qwen3_8_27b_nvfp4": qwen3_8_27b_nvfp4,
     "qwen3_6_35b_a3b": qwen3_6_35b_a3b,
+    "infinity_parser2_pro": infinity_parser2_pro,
     "qwen4_exp_gguf": qwen4_exp_gguf,
 }
