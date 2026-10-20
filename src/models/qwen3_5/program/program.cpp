@@ -423,15 +423,14 @@ std::size_t prepare_vision_overlay(const execution::Parameters& parameters, Devi
         const auto mib = [](std::size_t bytes) {
             return std::to_string(bytes / (1024ULL * 1024ULL)) + " MiB";
         };
-        // The exclusive fallback borrows the encode window from the evict-ranked weights, which
-        // the load-time storage trades shrink; name the knobs that trade against each other.
+        // The exclusive fallback borrows primary-device text weights. Never accept a
+        // configuration without a funded fallback.
         throw std::invalid_argument(
             "--vision-residency overlay needs " + mib(aligned) +
-            " of evict-ranked weights for one encode window, but the loaded output head, "
-            "embedding, proposal head and MTP or drafter weights provide " +
+            " of evict-ranked weights for one encode window, but the loaded primary-device "
+            "decoder, output head, embedding and speculative weights provide " +
             mib(pool->evictable_tail_bytes()) +
-            "; lower --vision-max-merged, use --vision-residency resident, or drop a flag that "
-            "shrinks those weights (--embedding-q4/q6, --lm-head-q4/q6)");
+            "; lower --vision-max-merged or use --vision-residency resident");
     }
     if (!pool->mirror_captured()) { pool->capture_window_mirror(window, device.transfer_stream); }
     return pool->window_capacity_bytes();

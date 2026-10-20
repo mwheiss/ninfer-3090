@@ -2,6 +2,7 @@
 #include "artifact/fixture.h"
 #include "artifact/formats.h"
 #include "models/qwen3_5/load.h"
+#include "models/qwen3_5/load/bindings.h"
 
 #include <algorithm>
 #include <array>
@@ -252,6 +253,40 @@ void logical_data_and_instances() {
         "--stage-layers without a multi-device split was accepted");
 }
 
+void overlay_decoder_backing() {
+    ModelFixture fixture;
+    fixture.file.write();
+    artifact::Reader reader(fixture.file.entry);
+    artifact::Binder binder(reader);
+    qwen::loading::Bindings bindings(binder);
+    const auto config = qwen::parse_config(reader.directory(), {});
+    qwen::ModelWeights weights;
+    weights.text = qwen::loading::bind_text(bindings, config.text, {}, StagePlan(1));
+    const auto count = bindings.weights.size();
+    qwen::loading::apply_vision_overlay_placement(bindings, weights, {count, count},
+                                                 {count, count});
+    const auto plan = std::move(binder).finish(16ULL * 1024 * 1024);
+    const auto endpoint = bindings.at(weights.text.output_head).reference.binding.parts[0].object;
+    const auto find = [&](artifact::ObjectHandle object) -> const artifact::DevicePlacement& {
+        const auto it = std::find_if(plan.device_objects.begin(), plan.device_objects.end(),
+                                     [&](const auto& placement) { return placement.object == object; });
+        require(it != plan.device_objects.end(), "overlay lost a device weight");
+        return *it;
+    };
+    for (const auto id : qwen::loading::layer_weights(weights.text.layers[0])) {
+        for (const auto& part : bindings.at(id).reference.binding.parts) {
+            const auto& placement = find(part.object);
+            require(placement.rank == 0 && placement.offset >= plan.evictable_tail_offset,
+                    "compact endpoints leave decoder storage unavailable for overlay fallback");
+            require(placement.offset + placement.bytes <= find(endpoint).offset,
+                    "overlay borrowed decoder storage before the preferred endpoint weights");
+        }
+    }
+    require(std::count_if(plan.device_objects.begin(), plan.device_objects.end(),
+                          [&](const auto& placement) { return placement.object == endpoint; }) == 1,
+            "overlay duplicated a shared embedding/output-head parent");
+}
+
 void native_uses() {
     const std::array<std::uint64_t, 2> shape{128, 64};
     const auto geometry = weight_geometry(QType::NVFP4, QuantLayout::BlockScaleK16M128x4, shape);
@@ -343,6 +378,7 @@ void invalid_model_data() {
 int main() {
     try {
         logical_data_and_instances();
+        overlay_decoder_backing();
         native_uses();
         invalid_model_data();
         std::cout << "model config, binding, resources and Use checks passed\n";

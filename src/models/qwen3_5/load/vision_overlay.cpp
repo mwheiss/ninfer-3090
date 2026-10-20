@@ -9,10 +9,12 @@
 namespace ninfer::models::qwen3_5::loading {
 namespace {
 
-// Eviction ladder: a higher rank sits nearer the arena end and is borrowed first. Only the
-// endpoint weights and the loaded speculative component are ranked, so the decoder layers are
-// never touched. A ternary token table and output head are small enough that the drafter's
-// adapter has to make up an encode window.
+// Eviction ladder: a higher rank sits nearer the arena end and is borrowed first. The
+// endpoint weights and the loaded speculative component are borrowed first. Primary-device
+// decoder weights are a last resort when compact heads cannot cover the encode window. The
+// exclusive window stops Text execution and restores every borrowed byte before Text resumes;
+// the pool mirrors only the planned window, not the entire eligible tail.
+constexpr std::uint32_t kEvictRankDecoder      = 100;
 constexpr std::uint32_t kEvictRankDraft        = 300;
 constexpr std::uint32_t kEvictRankMtp          = 400;
 constexpr std::uint32_t kEvictRankProposalHead = 500;
@@ -70,6 +72,14 @@ PinnedRange group_range(std::span<const WeightId> group, std::span<const BoundWe
 void apply_vision_overlay_placement(Bindings& bindings, const ModelWeights& weights,
                                     std::pair<std::size_t, std::size_t> mtp_parameters,
                                     std::pair<std::size_t, std::size_t> draft_parameters) {
+    for (std::size_t layer = 0; layer < weights.text.layers.size(); ++layer) {
+        if (weights.text.stages.placement(static_cast<std::uint32_t>(layer)).stage != 0) {
+            continue;
+        }
+        for (const WeightId id : layer_weights(weights.text.layers[layer])) {
+            bindings.evict(id, kEvictRankDecoder);
+        }
+    }
     for (std::size_t index = draft_parameters.first; index < draft_parameters.second; ++index) {
         bindings.evict(WeightId{index}, kEvictRankDraft);
     }
