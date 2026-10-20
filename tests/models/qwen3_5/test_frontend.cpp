@@ -531,6 +531,38 @@ int test_tokenizer_config_merge() {
                                    .generation_config_json = conflicting.generation_config_json});
         }),
         "conflicting tokenizer/tokenizer_config added-token definitions were accepted");
+
+    FrontendResources json_only = resources();
+    config = nlohmann::json::parse(json_only.tokenizer_config_json);
+    config.erase("added_tokens_decoder");
+    json_only.tokenizer_config_json = config.dump();
+    const fi::Tokenizer without_duplicate({json_only.tokenizer_json,
+                                           json_only.tokenizer_config_json,
+                                           json_only.generation_config_json});
+    for (const auto& [text, id] :
+         std::array<std::pair<const char*, int>, 3>{{{"<|im_start|>", 248045},
+                                                    {"<|im_end|>", 248046},
+                                                    {"<|image_pad|>", 248056}}}) {
+        failures += check(without_duplicate.encode(text) == std::vector<int>{id} &&
+                              without_duplicate.is_special_token(id) &&
+                              without_duplicate.decode_token_bytes(id) == text,
+                          "tokenizer.json-only added tokens changed their IDs or flags");
+    }
+    config["added_tokens_decoder"] = nlohmann::json::array();
+    json_only.tokenizer_config_json = config.dump();
+    failures += check(throws_invalid_argument([&] {
+                          (void)fi::Tokenizer({json_only.tokenizer_json,
+                                               json_only.tokenizer_config_json,
+                                               json_only.generation_config_json});
+                      }),
+                      "malformed added_tokens_decoder was accepted");
+    for (const char* invalid_config : {"[]", "null"}) {
+        failures += check(throws_invalid_argument([&] {
+                              (void)fi::Tokenizer({json_only.tokenizer_json, invalid_config,
+                                                   json_only.generation_config_json});
+                          }),
+                          "non-object tokenizer_config.json was accepted");
+    }
     return failures;
 }
 
@@ -1124,6 +1156,28 @@ int test_official_resource_guards() {
                               fixture_tokenizer().encode("hello"),
                       "custom template source was not executed");
 
+    return failures;
+}
+
+int test_optional_bos_flag() {
+    FrontendResources source = resources("{{ messages[0].content }}");
+    auto config = nlohmann::json::parse(source.tokenizer_config_json);
+    config.erase("add_bos_token");
+    source.tokenizer_config_json = config.dump();
+    const auto frontend = make_frontend(source, false);
+    ninfer::PromptInput input;
+    ninfer::ChatMessage message;
+    message.role = ninfer::ChatRole::User;
+    message.parts.push_back({.text = "hello"});
+    input.messages.push_back(std::move(message));
+    const auto prepared = frontend.prepare(input);
+    int failures = check(FrontendFactory::inspect(prepared).token_ids ==
+                             fixture_tokenizer().encode("hello"),
+                         "omitted add_bos_token changed the encoded prompt");
+    config["add_bos_token"] = true;
+    source.tokenizer_config_json = config.dump();
+    failures += check(throws_invalid_argument([&] { (void)make_frontend(source, false); }),
+                      "explicit BOS insertion was accepted");
     return failures;
 }
 
@@ -3664,6 +3718,7 @@ int main() {
     failures += test_literal_cache_boundary();
     failures += test_selected_template_recovery_boundary();
     failures += test_official_resource_guards();
+    failures += test_optional_bos_flag();
     failures += test_template_file_execution();
     failures += test_invalid_public_part_enums(frontend);
     failures += test_text_and_image_prepare(frontend);
