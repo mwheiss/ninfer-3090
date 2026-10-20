@@ -63,6 +63,7 @@ The built-in recipes are ordinary Python functions in
 | `qwen3_6_27b` | Q4/Q5 projections, Q6 vocabulary weights | None |
 | `qwen3_8_27b` | `grouped_search` with signed scales; Q4/Q5 projections, Q4 mixer outputs and MLP down in layers 36–63, Q4 embedding, Q6 head | `imatrix` |
 | `qwen3_6_35b_a3b` | Q4 experts, Q5/Q6 expert down, Q8 shared/projection weights | None |
+| `infinity_parser2_pro` | The 35B-A3B text profile above; BF16 vision except its Q8 final merger projection | None |
 | `qwen3_6_27b_nvfp4` | Imported NVFP4, selected BF16 projections, Q8 vocabulary weights | `quantized` |
 | `qwen3_8_27b_nvfp4` | Imported NVFP4/FP8, FP8 embedding generated from BF16 | `quantized` |
 | `bonsai2_27b_ternary` | Imported ternary T2 text tower with Hadamard-rotated Uses; the embedding is T2 too, stored inverse-rotated and restored to the primal basis by the runtime on gather | `ternary` (GGUF) |
@@ -91,6 +92,61 @@ head under the checkpoint's `mtp.*` tensor names. DFlash and DFlash2 use the cor
 source, supplied as `--source dflash=PATH` or `--source dflash2=PATH`. An artifact may contain several optional
 components; the Engine loads only the ones selected at startup, including at most one speculative
 backend. Component availability and startup selection are independent.
+
+### Infinity Parser2 Pro
+
+[`infly/Infinity-Parser2-Pro`](https://huggingface.co/infly/Infinity-Parser2-Pro) uses the existing
+Qwen3.5 35B-A3B MoE implementation. The `infinity_parser2_pro` recipe keeps Q4 expert gate/up,
+Q5 expert down (Q6 in layers 34, 38 and 39), Q8 shared experts and text projections, a Q8 embedding
+and Q6 output head. Vision stays BF16 except its final merger projection, which uses the existing
+Q8 2048-wide output route. The encoded weights occupy approximately 20.4 GiB before runtime
+allocations. No MTP or draft weights are present in the official checkpoint.
+
+Download the original checkpoint, keeping the revision fixed:
+
+```bash
+hf download infly/Infinity-Parser2-Pro \
+  --revision b27d470100514329fc6439aada8f16ccea5f9e2a \
+  --local-dir /path/to/Infinity-Parser2-Pro
+
+python3.11 -m tools.convert \
+  --model /path/to/Infinity-Parser2-Pro \
+  --recipe infinity_parser2_pro \
+  --components text,vision \
+  --name infinity-parser2-pro \
+  --device cpu \
+  --out out/infinity_parser2_pro.ninfer
+```
+
+The CPU conversion path avoids needing free VRAM while preparing the artifact. Conversion extracts
+the image and video objects from the checkpoint's combined `processor_config.json` when separate
+processor files are absent, and derives missing generation stop IDs from the outer `config.json`.
+Explicit resource files and `--resource` overrides take precedence. Source checkpoint files are
+not modified. Its tokenizer omits `add_bos_token`; omitted and explicit `false` both mean no BOS
+insertion, while explicit `true` remains unsupported.
+Added-token definitions can live entirely in `tokenizer.json`; when a duplicate
+`added_tokens_decoder` map is supplied, its definitions must still agree.
+
+Start an isolated OCR endpoint with ordinary decoding and explicit OCR sampling defaults:
+
+```bash
+build-ninja/apps/ninfer-serve out/infinity_parser2_pro.ninfer \
+  --host 127.0.0.1 --port 18081 \
+  --vision --max-context 65536 --kv-capacity 65536 \
+  --max-concurrency 1 --prefill-chunk 1024 --kv-dtype bf16 \
+  --host-context-mib 1024 \
+  --no-thinking --temperature 0 --top-p 1 --top-k 0 --min-p 0 \
+  --presence-penalty 0 --frequency-penalty 0
+```
+
+The explicit zero penalties matter for faithful transcription of repeated words and numbers.
+Temperature zero selects exact argmax; stochastic top-p and top-k filters are disabled here.
+The retained Host context cache is capped at 1 GiB for this page-oriented OCR profile.
+The endpoint accepts the existing OpenAI-compatible image messages. Use a document transcription
+or layout prompt and a sufficient output budget. An OCR example is to send an image and ask for
+Markdown with LaTeX formulas and HTML tables, without paraphrasing. Startup validates that the
+chosen context and vision allocations fit the free GPU memory; set the context explicitly for
+your workload.
 
 ### Ternary Bonsai 2 27B
 

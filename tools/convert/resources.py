@@ -15,6 +15,40 @@ TEXT_RESOURCES = (
 VISION_RESOURCES = ("preprocessor_config.json", "video_preprocessor_config.json")
 
 
+def _resource_bytes(model_dir: Path, role: str, overrides: Mapping) -> bytes:
+    path = Path(overrides[role]) if role in overrides else model_dir / role
+    if role in overrides or path.is_file():
+        return path.read_bytes()
+    if role in VISION_RESOURCES:
+        bundle_path = model_dir / "processor_config.json"
+        bundle = json.loads(bundle_path.read_text())
+        key = (
+            "image_processor"
+            if role == "preprocessor_config.json"
+            else "video_processor"
+        )
+        value = bundle.get(key) if isinstance(bundle, dict) else None
+        if not isinstance(value, dict):
+            raise ValueError(f"{bundle_path}: {key} must contain a processor object")
+        return json.dumps(value, ensure_ascii=False).encode("utf-8")
+    if role == "generation_config.json":
+        config_path = model_dir / "config.json"
+        config = json.loads(config_path.read_text())
+        if not isinstance(config, dict) or config.get("eos_token_id") is None:
+            raise ValueError(
+                f"{config_path}: missing eos_token_id; provide generation_config.json"
+            )
+        # Hugging Face derives generation defaults from the outer model config when
+        # no generation_config.json is distributed. A nested text EOS may differ.
+        value = {
+            key: config[key]
+            for key in ("bos_token_id", "eos_token_id", "pad_token_id")
+            if key in config
+        }
+        return json.dumps(value, ensure_ascii=False).encode("utf-8")
+    return path.read_bytes()
+
+
 def token_domain(
     tokenizer: dict, config: dict, vocab_size: int
 ) -> tuple[int, tuple[int, ...]]:
@@ -85,7 +119,7 @@ def load_resources(
         references[component] = {}
         for role in names:
             path = Path(overrides[role]) if role in overrides else model_dir / role
-            data = path.read_bytes()
+            data = _resource_bytes(model_dir, role, overrides)
             if not data:
                 raise ValueError(f"{path}: resource is empty")
             text = data.decode("utf-8")

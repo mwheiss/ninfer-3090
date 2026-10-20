@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 import json
 
 import pytest
@@ -8,7 +9,10 @@ from safetensors.torch import save_file
 import torch
 
 from tools.convert.qwen3_5 import build_model, draft_config, text_config
+from tools.convert.official_recipes import RECIPES
+from tools.convert.recipe import Recipe
 from tools.convert.sources.safetensors import SafetensorsSource
+from tools.convert.sources.logical import array_source
 
 
 def _config(*, moe=False):
@@ -90,6 +94,38 @@ def _checkpoint(path, config, tensors):
 def _values(model, name):
     parameter = model.parameters[name]
     return parameter.source.values().reshape(parameter.shape)
+
+
+@pytest.mark.parametrize(
+    ("recipe_name", "vision_format"),
+    (("infinity_parser2_pro", "bf16"), ("qwen3_6_35b_a3b", "q4_g64_fp16")),
+)
+def test_pro_recipe_preserves_native_moe_banks_and_vision_precision(
+    tmp_path, recipe_name, vision_format
+):
+    with _checkpoint(tmp_path / "source", _config(moe=True), {}) as source:
+        model = build_model(source, components=("text", "vision"))
+        for name, parameter in tuple(model.parameters.items()):
+            model.parameters[name] = replace(
+                parameter,
+                source=array_source(torch.zeros(parameter.shape), name),
+            )
+        recipe = Recipe(model)
+        RECIPES[recipe_name](model, recipe, {})
+        prepared = recipe.prepare(device="cpu")
+
+    def stored_format(parameter):
+        return next(
+            job.spec.format for job in prepared.weights if parameter in job.parameters
+        )
+
+    assert stored_format("text/layers/0/moe/experts/0/gate") == "q4_g64_fp16"
+    assert stored_format("text/layers/0/moe/experts/0/down") == "q5_g64_fp16"
+    assert stored_format("text/layers/0/moe/shared/gate") == "q8_g32_fp16"
+    assert stored_format("text/layers/0/moe/router") == "bf16"
+    assert stored_format("text/layers/1/attention/query") == "q8_g32_fp16"
+    assert stored_format("vision/layers/0/attention/query") == vision_format
+    assert stored_format("vision/merger/fc2") == "q8_g32_fp16"
 
 
 def test_model_mapping_preserves_query_gate_gdn_mtp_and_vision_axes(tmp_path):
