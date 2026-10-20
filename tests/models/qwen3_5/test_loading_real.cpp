@@ -68,6 +68,10 @@ void check_selection(const qwen::LoadPlan& plan, const LoadOptions& options) {
                 "device parent was planned more than once");
         require(item.offset >= end && item.offset % item.alignment == 0,
                 "device placement overlaps or is unaligned");
+        if (options.overlay_vision()) {
+            require(item.offset - end < item.alignment,
+                    "overlay placement wastes weight capacity on avoidable chunk padding");
+        }
         end = item.offset + item.bytes;
     }
     require(end == plan.materialization().device_capacity(0),
@@ -237,6 +241,12 @@ int main(int argc, char** argv) {
             artifact::Reader reader(path);
             auto plan = qwen::plan_load(reader, options);
             check_selection(plan, options);
+            if (options.vision && !options.overlay_vision()) {
+                auto overlay_options = options;
+                overlay_options.vision_residency = VisionResidency::Overlay;
+                const auto overlay = qwen::plan_load(reader, overlay_options);
+                check_selection(overlay, overlay_options);
+            }
             {
                 // The default pipeline split follows each device's free memory, and the first stage
                 // also holds the embedding and head.
