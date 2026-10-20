@@ -116,8 +116,10 @@ LoadPlan plan_load(const artifact::Reader& reader, LoadOptions options) {
                          std::string(options.speculative_component()) + "/final_hidden");
     }
     out->pending         = std::move(bindings.weights);
-    out->materialization = std::move(binder).finish(
-        options.overlay_vision() ? EvictableWeightPool::kChunkBytes : 1);
+    // The weight pool rounds the borrowable suffix inward to whole VMM chunks. Keep
+    // natural tensor alignment here: padding before the tail can consume another GPU
+    // chunk and reduce the fitted context even though no additional weights were loaded.
+    out->materialization = std::move(binder).finish();
     out->info.name       = reader.directory().metadata.value(
         "name", std::string(architecture_name(text.architecture)));
     out->info.metadata_json   = reader.directory().metadata.dump();
