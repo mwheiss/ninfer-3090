@@ -197,8 +197,10 @@ waits for the encode to finish and the pages to return, so a loan never causes a
 preemption of its own.
 
 When free pages cannot cover the window, it falls back to the evict-ranked tail of the text weights
-(lm_head, token embedding, draft head, MTP head), restored from a pinned mirror before the prefill
-unit ends. That window is exclusive: the borrowed weights are unmapped, so nothing else runs until
+(lm_head, token embedding and speculative weights first, then primary-device decoder weights when
+compact endpoints do not cover the window), restored from a pinned mirror before the prefill
+unit ends. Only the planned window is mirrored, not the entire eligible tail. That window is
+exclusive: the borrowed weights are unmapped, so nothing else runs until
 it closes. The fallback is always available, so a vision request never fails for lack of memory,
 and a KV cache smaller than one window simply uses it for every image.
 

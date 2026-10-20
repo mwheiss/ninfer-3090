@@ -405,6 +405,8 @@ plane 与 shard；Vision overlay 的 KV loan 只解除 rank 0 plane 的 granule 
 本 fork 的 Vision overlay residency（`--vision-residency overlay`）：Vision tower 常驻 pinned host，
 每个媒体项在一个有界 window 中编码，window 从空闲 Main KV page 借用设备内存（VMM granule 重映射，
 `core/evictable_kv_pool`、`core/kv_loan.h`），不足时退回 evict-ranked 文本权重尾部（独占）。
+尾部优先借用 embedding、head 和 speculative 权重；端点过小时才借用主设备 decoder 权重。
+仅为最大 window 保存 pinned mirror，独占窗口结束并逐字节恢复后才继续 Text；启动仍拒绝无法覆盖 window 的权重池。
 Program 同时只持有一个 window（`execution/vision_overlay`）。Engine 在一轮所有必需 unit permit
 预留之后，为获得 Prefill permit 的 lane 调用 `Program::reserve_vision_window`：若其下一 chunk 需要
 尚未编码的媒体项，便借页并在 Vision stream 上提前开始编码；页不足时只通过 ResourceManager 回收
