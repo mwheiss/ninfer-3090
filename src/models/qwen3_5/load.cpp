@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <stdexcept>
+#include <unordered_set>
 #include <utility>
 
 namespace ninfer::models::qwen3_5 {
@@ -138,10 +139,14 @@ constexpr std::uint64_t kStageFixedBytes = 1536ULL << 20;
 constexpr std::uint64_t kHeadStageFixedBytes = 1024ULL << 20;
 
 std::uint64_t parameter_bytes(const artifact::Reader& reader, const loading::Bindings& bindings,
-                              WeightId id) {
+                              WeightId id, std::unordered_set<std::size_t>& parents) {
     std::uint64_t total = 0;
     for (const auto& part : bindings.at(id).reference.binding.parts) {
-        total += reader.geometry(part.object).bytes;
+        // Materialization owns whole physical parents. Packed expert banks and fused
+        // projections can expose many logical views of the same allocation.
+        if (parents.insert(part.object.index).second) {
+            total += reader.geometry(part.object).bytes;
+        }
     }
     return total;
 }
@@ -169,8 +174,9 @@ std::vector<std::uint32_t> default_stage_layers(const artifact::Reader& reader,
     std::uint64_t layer_bytes_total = 0;
     for (std::size_t layer = 0; layer < weights.layers.size(); ++layer) {
         LayerCost cost;
+        std::unordered_set<std::size_t> parents;
         for (const WeightId id : loading::layer_weights(weights.layers[layer])) {
-            cost.weight_bytes += parameter_bytes(reader, bindings, id);
+            cost.weight_bytes += parameter_bytes(reader, bindings, id, parents);
         }
         if (text.layer_types[layer] == MixerKind::FullAttention && text.attention) {
             // One page group of this layer: every plane of a page, for every KV head, as stored.
@@ -195,9 +201,11 @@ std::vector<std::uint32_t> default_stage_layers(const artifact::Reader& reader,
     }
 
     // The head stage keeps the embedding, the head and the final norm; MTP's layer sits with them.
-    std::uint64_t head_bytes = parameter_bytes(reader, bindings, weights.token_embedding) +
-                               parameter_bytes(reader, bindings, weights.output_head) +
-                               parameter_bytes(reader, bindings, weights.final_norm);
+    std::unordered_set<std::size_t> head_parents;
+    std::uint64_t head_bytes = 0;
+    for (const WeightId id : {weights.token_embedding, weights.output_head, weights.final_norm}) {
+        head_bytes += parameter_bytes(reader, bindings, id, head_parents);
+    }
     if (config.mtp && options.speculative == SpeculativeBackend::Mtp) {
         head_bytes += layer_bytes_total / std::max<std::size_t>(layers.size(), 1);
     }
@@ -207,7 +215,7 @@ std::vector<std::uint32_t> default_stage_layers(const artifact::Reader& reader,
         const std::size_t first = bindings.weights.size();
         (void)loading::bind_vision(bindings, *config.vision, text, artifact::Residency::Device);
         for (std::size_t index = first; index < bindings.weights.size(); ++index) {
-            head_bytes += parameter_bytes(reader, bindings, WeightId{index});
+            head_bytes += parameter_bytes(reader, bindings, WeightId{index}, head_parents);
         }
     }
     // A DFlash draft runs entirely on the primary device; its embedding and head are the target's,
@@ -217,7 +225,7 @@ std::vector<std::uint32_t> default_stage_layers(const artifact::Reader& reader,
         (void)loading::bind_draft(bindings, *config.draft, text, weights,
                                   std::string(options.speculative_component()));
         for (std::size_t index = first; index < bindings.weights.size(); ++index) {
-            head_bytes += parameter_bytes(reader, bindings, WeightId{index});
+            head_bytes += parameter_bytes(reader, bindings, WeightId{index}, head_parents);
         }
     }
 
