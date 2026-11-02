@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <array>
 #include <iostream>
+#include <string_view>
 
 namespace {
 
@@ -287,6 +288,103 @@ void overlay_decoder_backing() {
             "overlay duplicated a shared embedding/output-head parent");
 }
 
+void packed_expert_stage_sizing() {
+    const auto populate = [](ModelFixture& fixture, bool packed) {
+        constexpr std::uint32_t layers  = 8;
+        constexpr std::uint32_t experts = 256;
+        auto& config                    = fixture.file.root["components"]["text"]["config"];
+        config["architectures"]         = {"Qwen3_5MoeForCausalLM"};
+        config["model_type"]            = "qwen3_5_moe_text";
+        config["num_hidden_layers"]     = layers;
+        config["layer_types"]           = std::vector<std::string>(layers, "full_attention");
+        config.erase("intermediate_size");
+        config["num_experts"]                     = experts;
+        config["num_experts_per_tok"]             = 4;
+        config["moe_intermediate_size"]           = 24;
+        config["shared_expert_intermediate_size"] = 24;
+        auto& bindings                            = fixture.file.root["bindings"];
+        for (auto it = bindings.begin(); it != bindings.end();) {
+            if (it.key().starts_with("text/layers/")) {
+                it = bindings.erase(it);
+            } else {
+                ++it;
+            }
+        }
+        Json uses = Json::array();
+        for (const auto& use : fixture.file.root["uses"]) {
+            if (!use.at("parameter").get<std::string>().starts_with("text/layers/")) {
+                uses.push_back(use);
+            }
+        }
+        fixture.file.root["uses"] = std::move(uses);
+        Json objects              = Json::array();
+        for (const auto& object : fixture.file.root["objects"]) {
+            if (object.at("kind") == "resource" || object.at("id") == "embedding-storage" ||
+                object.at("id") == "text/final_norm") {
+                objects.push_back(object);
+            }
+        }
+        fixture.file.root["objects"] = std::move(objects);
+        for (std::uint32_t layer = 0; layer < layers; ++layer) {
+            const auto p = "text/layers/" + std::to_string(layer) + "/";
+            fixture.parameter(p + "input_norm", {128});
+            fixture.parameter(p + "post_attention_norm", {128});
+            for (const auto* role : {"query", "gate", "key", "value"}) {
+                const std::uint64_t rows =
+                    std::string_view(role) == "query" || std::string_view(role) == "gate" ? 16 : 8;
+                fixture.parameter(p + "attention/" + role, {rows, 128}, p + "mixer_input");
+            }
+            fixture.parameter(p + "attention/query_norm", {8});
+            fixture.parameter(p + "attention/key_norm", {8});
+            fixture.parameter(p + "attention/output", {128, 16}, p + "attention/gated_output");
+            fixture.parameter(p + "moe/router", {experts, 128}, p + "ffn_input");
+            fixture.parameter(p + "moe/shared_score", {1, 128}, p + "ffn_input");
+            for (const auto* role : {"gate", "up", "down"}) {
+                const bool down                        = std::string_view(role) == "down";
+                const std::vector<std::uint64_t> shape = down ? std::vector<std::uint64_t>{128, 24}
+                                                              : std::vector<std::uint64_t>{24, 128};
+                const auto bank                        = p + "moe/" + role + "-bank";
+                if (packed) { fixture.tensor(bank, {experts, shape[0], shape[1]}); }
+                for (std::uint32_t expert = 0; expert < experts; ++expert) {
+                    const auto ep        = p + "moe/experts/" + std::to_string(expert) + "/";
+                    const auto parameter = ep + role;
+                    const auto input     = down ? ep + "product" : p + "ffn_input";
+                    if (packed) {
+                        const std::uint64_t elements = shape[0] * shape[1];
+                        bindings[parameter]          = {
+                            {"parts",
+                             Json::array(
+                                 {{{"object", bank},
+                                   {"range", {expert * elements, (expert + 1) * elements}}}})}};
+                        fixture.use(parameter, input);
+                    } else {
+                        fixture.parameter(parameter, shape, input);
+                    }
+                }
+                fixture.parameter(p + "moe/shared/" + role, shape,
+                                  down ? p + "moe/shared/product" : p + "ffn_input");
+            }
+        }
+        fixture.file.root["files"][0]["payload_bytes"] = fixture.file.payload.size();
+        fixture.file.write();
+    };
+    ModelFixture unpacked;
+    ModelFixture packed;
+    populate(unpacked, false);
+    populate(packed, true);
+    artifact::Reader separate(unpacked.file.entry);
+    artifact::Reader stacked(packed.file.entry);
+    const std::array<std::array<std::uint64_t, 2>, 3> budgets{
+        {{4ULL << 30, 8ULL << 30}, {8ULL << 30, 4ULL << 30}, {8ULL << 30, 8ULL << 30}}};
+    const qwen::StageSizing sizing{.kv_storage = KvCacheStorage::BFloat16, .state_slots = 2};
+    for (const auto& free : budgets) {
+        const auto expected = qwen::default_stage_layers(separate, {}, sizing, free);
+        const auto actual   = qwen::default_stage_layers(stacked, {}, sizing, free);
+        require(actual == expected,
+                "packing experts into shared physical parents changed the stage memory split");
+    }
+}
+
 void native_uses() {
     const std::array<std::uint64_t, 2> shape{128, 64};
     const auto geometry = weight_geometry(QType::NVFP4, QuantLayout::BlockScaleK16M128x4, shape);
@@ -379,6 +477,7 @@ int main() {
     try {
         logical_data_and_instances();
         overlay_decoder_backing();
+        packed_expert_stage_sizing();
         native_uses();
         invalid_model_data();
         std::cout << "model config, binding, resources and Use checks passed\n";
