@@ -1759,7 +1759,7 @@ void test_remote_only_share_holds_when_a_lookup_registers_during_a_refresh() {
     TempDirectory reader_directory;
     auto remote                        = std::make_shared<MemoryObjectStore>();
     const std::uint64_t manifest_bytes = fill_bucket_with_sessions(remote, writer_directory.path());
-    ContextStore::Options options      = remote_options(reader_directory.path(), remote);
+    ContextStore::Options options      = remote_options_refreshing_explicitly(reader_directory.path(), remote);
     options.max_bytes = 4 * (3 * manifest_bytes + manifest_bytes / 2); // the share holds three
     ContextStore reader(options);
     bool lookup_done = false;
