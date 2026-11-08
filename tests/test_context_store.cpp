@@ -1660,7 +1660,10 @@ void test_remote_only_manifests_are_bounded_by_max_bytes() {
     const std::uint64_t manifest_bytes = fill_bucket_with_sessions(remote, writer_directory.path());
     ContextStore::Options options      = remote_options(reader_directory.path(), remote);
     options.max_bytes = 4 * (3 * manifest_bytes + manifest_bytes / 2); // the share holds three
+    remote->down = true;
     ContextStore reader(options);
+    check(drained(reader), "the reader's initial refresh did not finish");
+    remote->down = false;
     check(reader.refresh_remote() == 3 && reader.list().size() == 3,
           "the remote-only manifests were not limited to their share");
     for (int index = 9; index < 12; ++index) {
@@ -1701,7 +1704,10 @@ void test_remote_only_share_holds_when_a_lookup_registers_during_a_refresh() {
     const std::uint64_t manifest_bytes = fill_bucket_with_sessions(remote, writer_directory.path());
     ContextStore::Options options      = remote_options(reader_directory.path(), remote);
     options.max_bytes = 4 * (3 * manifest_bytes + manifest_bytes / 2); // the share holds three
+    remote->down = true;
     ContextStore reader(options);
+    check(drained(reader), "the reader's initial refresh did not finish");
+    remote->down = false;
     bool lookup_done = false;
     remote->on_manifest_get = [&] {
         if (lookup_done) { return; }
