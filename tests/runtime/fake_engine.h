@@ -995,6 +995,9 @@ public:
             lane.generated += decision.accepted_tokens;
             lane.decoding = true;
             result.rows[row].disposition = disposition;
+            // A released row no longer owns its lane, as in the native Program. The Engine
+            // removes its slot without a separate abort and may bind the next request here.
+            if (decision.failed || decision.cancelled) { lane = Lane{}; }
         }
         return result;
     }
