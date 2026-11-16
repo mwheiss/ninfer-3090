@@ -27,7 +27,7 @@ ninfer::RequestOptions request(std::uint32_t outputs, bool hot) {
         // Sampling at a high temperature makes most drafts miss, which is the workload the narrow
         // window exists for; greedy decoding of a counting prompt accepts nearly all of them.
         options.execution.sampling.temperature = 1.8F;
-        options.execution.sampling.top_k       = 200;
+        options.execution.sampling.top_k       = 20;
     } else {
         options.execution.sampling.temperature = 0.0F;
     }
