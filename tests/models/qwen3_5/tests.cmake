@@ -237,6 +237,7 @@ set(ninfer_qwen3_5_real_tests
   ninfer_qwen3_5_dflash_prefill_real_test
   ninfer_qwen3_5_moe_real_test
   ninfer_qwen3_5_dflash_real_test
+  ninfer_qwen3_5_context_rows_real_test
   ninfer_qwen3_5_graft_real_test
   ninfer_qwen3_5_stages_real_test
   ninfer_qwen3_5_suspend_real_test)
