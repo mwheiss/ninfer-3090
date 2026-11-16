@@ -168,8 +168,9 @@ ImageRun run_image(const char* artifact, ninfer::VisionResidency residency,
     return out;
 }
 
-// `context` 8192 leaves free KV pages enough for the window; 1024 does not (the whole Main KV cache
-// is smaller than one window), which forces the exclusive weight-tail window.
+// `context` 8192 leaves free KV pages enough for the window; 1536 does not (the whole Main KV cache
+// is smaller than one window), which forces the exclusive weight-tail window. The smaller context
+// still retains the image after the processor's 1024-token vision-budget reserve.
 int exercise_equivalence(const char* artifact, std::uint32_t context, bool exclusive) {
     const ImageRun resident = run_image(artifact, ninfer::VisionResidency::Resident, context);
     const ImageRun overlay  = run_image(artifact, ninfer::VisionResidency::Overlay, context);
@@ -582,7 +583,7 @@ int run() {
     int failures = 0;
     if (scenario == "all" || scenario == "equivalence") {
         failures += exercise_equivalence(artifact, 8192, false);
-        failures += exercise_equivalence(artifact, 1024, true);
+        failures += exercise_equivalence(artifact, 1536, true);
     }
     for (int repeat = 0; repeat < repeats; ++repeat) {
         if (repeats > 1) { std::cout << "repeat " << repeat + 1 << "/" << repeats << '\n'; }
