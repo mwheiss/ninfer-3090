@@ -4,7 +4,6 @@
   "max-pending-requests": 16,
   "pending-timeout-ms": 600000,
   "shared-expert-stream": true,
-  "mtp-joint-acceptance": true,
   "gdn-head-map": true,
   "moe-precast-input": true,
   "moe-gate-up-registers": true,
