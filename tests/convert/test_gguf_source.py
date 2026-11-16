@@ -152,7 +152,8 @@ def _two(ne=(32, 2), type_id=8):
         (lambda: gguf_bytes([], _two(), offsets=[0, 32]), "overlaps"),
         (lambda: gguf_bytes([], _two(), offsets=[0, 128]), "next tensor starts"),
         (lambda: gguf_bytes([], _two(), offsets=[0, 70]), "not aligned"),
-        (lambda: gguf_bytes([], [("x", 17, (256, 1), bytes(74))]), "GGML type 17"),
+        # IQ2_XS (17) is supported; use an invalid type id for this rejection case.
+        (lambda: gguf_bytes([], [("x", 0xFFFFFFFF, (256, 1), bytes(74))]), "GGML type 4294967295"),
         (lambda: gguf_bytes([], [("x", 8, (48, 1), bytes(51))]), "not a multiple"),
         (lambda: gguf_bytes([], _two())[:-10], "exceeds the file"),
         (lambda: gguf_bytes([], _two())[:40], "truncated GGUF header"),
