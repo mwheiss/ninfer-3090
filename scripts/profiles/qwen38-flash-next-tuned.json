@@ -7,6 +7,5 @@
   "gdn-head-map": true,
   "moe-precast-input": true,
   "moe-gate-up-registers": true,
-  "gdn-async-commit": true,
   "prefill-cpu-share": "0.4"
 }

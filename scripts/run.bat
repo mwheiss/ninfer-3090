@@ -449,7 +449,7 @@ set "DRAFT_TOKENS=3"
 if not "%NINFER_DRAFT_TOKENS%"=="" set "DRAFT_TOKENS=%NINFER_DRAFT_TOKENS%"
 set "SPEC_ARGS="
 set "SPEC_LABEL=no speculation"
-if /i "%SPEC%"=="mtp" set "SPEC_ARGS=--spec mtp --draft-tokens %DRAFT_TOKENS% --mtp-joint-acceptance"
+if /i "%SPEC%"=="mtp" set "SPEC_ARGS=--spec mtp --draft-tokens %DRAFT_TOKENS% --mtp-joint-acceptance --gdn-async-commit"
 if /i "%SPEC%"=="mtp" set "SPEC_LABEL=MTP, up to %DRAFT_TOKENS% drafts"
 if /i not "%SPEC%"=="mtp" if /i not "%SPEC%"=="none" (
   echo NINFER_SPEC must be mtp or none for Qwen3.8-Flash-Next, got %SPEC% 1>&2

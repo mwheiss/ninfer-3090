@@ -370,7 +370,7 @@ case "$model_key/$profile" in
     spec_args=()
     case "$SPEC" in
       mtp)
-        spec_args=(--spec mtp --draft-tokens "$DRAFT_TOKENS" --mtp-joint-acceptance)
+        spec_args=(--spec mtp --draft-tokens "$DRAFT_TOKENS" --mtp-joint-acceptance --gdn-async-commit)
         spec_label="MTP, up to $DRAFT_TOKENS drafts" ;;
       none) spec_label='no speculation' ;;
       *) printf 'NINFER_SPEC must be mtp or none for Qwen3.8-Flash-Next, got %s\n' "$SPEC" >&2; exit 2 ;;

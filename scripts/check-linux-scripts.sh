@@ -240,11 +240,13 @@ touch "$tmp/qwen4exp-iq2xs.ninfer" "$tmp/qwen4exp-iq2xs-mtp.ninfer"
 recorded="$(record flash_next_plain NINFER_MODEL="$tmp/qwen4exp-iq2xs.ninfer" -- qwen38-flash-next)"
 refuse_flag 'Flash-Next plain artifact' "$recorded" '--spec'
 refuse_flag 'Flash-Next plain artifact' "$recorded" '--mtp-joint-acceptance'
+refuse_flag 'Flash-Next plain artifact' "$recorded" '--gdn-async-commit'
 recorded="$(record flash_next_mtp -- qwen38-flash-next)"
-expect_flags 'Flash-Next MTP artifact' "$recorded" '--spec mtp --draft-tokens 3 --mtp-joint-acceptance'
+expect_flags 'Flash-Next MTP artifact' "$recorded" '--spec mtp --draft-tokens 3 --mtp-joint-acceptance --gdn-async-commit'
 recorded="$(record flash_next_none NINFER_SPEC=none -- qwen38-flash-next)"
 refuse_flag 'Flash-Next NINFER_SPEC=none' "$recorded" '--spec'
 refuse_flag 'Flash-Next NINFER_SPEC=none' "$recorded" '--mtp-joint-acceptance'
+refuse_flag 'Flash-Next NINFER_SPEC=none' "$recorded" '--gdn-async-commit'
 
 # Every profile and variant, whole: the file it is served from and every option in force, as
 # measured (docs/maintainer/launcher-profiles.md). Moving a flag between a profile file and the
